@@ -1,0 +1,21 @@
+# tcp-proxy -c proxy.conf.example
+#
+# Every directive, with its default where it has one.
+
+workers 0                 # worker threads; 0 means one per CPU
+buffer_kb 16              # per direction, per connection: 32 KiB a connection by default
+connect_timeout_ms 3000   # a backend that has not accepted by then counts as failed
+idle_timeout_s 300        # close connections where nothing has moved for this long
+drain_s 5                 # on SIGINT or SIGTERM: stop accepting, give open connections this long
+retries 2                 # connect attempts after the first, each to a different backend
+eject_after 1             # consecutive failed connects that take a backend out of rotation
+eject_for_s 5             # how long it stays out before it is tried again
+log -                     # one JSON line per connection: - for stdout, a path, or omit for none
+
+# pool <name> <round-robin | least-connections | source-hash> <host:port>...
+pool web least-connections 127.0.0.1:9001 127.0.0.1:9002 127.0.0.1:9003
+pool cache source-hash 127.0.0.1:6380 127.0.0.1:6381
+
+# listen <host:port> <pool>: routing is by the address a client connects to
+listen 0.0.0.0:8080 web
+listen 127.0.0.1:6379 cache

@@ -1,0 +1,34 @@
+Linux version 6.12.76-linuxkit (root@buildkitsandbox) (gcc (
+# 1. Latency added, one connection, 64-byte request/response
+direct	{"mode":"rr","connections":1,"size":64,"seconds":5.0,"requests":179944,"rps":35989,"mb_per_s":2.30,"gbit_per_s":0.018,"p50_us":26.6,"p90_us":31.4,"p99_us":43.9,"p999_us":118.6,"max_us":1209.6,"errors":0}
+proxy	{"mode":"rr","connections":1,"size":64,"seconds":5.0,"requests":87884,"rps":17577,"mb_per_s":1.12,"gbit_per_s":0.009,"p50_us":54.1,"p90_us":63.4,"p99_us":95.1,"p999_us":186.9,"max_us":761.4,"errors":0}
+# 2. Throughput and CPU per request against workers, 256 connections
+direct	{"mode":"rr","connections":256,"size":64,"seconds":5.0,"requests":4858485,"rps":971697,"mb_per_s":62.19,"gbit_per_s":0.498,"p50_us":239.1,"p90_us":383.3,"p99_us":546.5,"p999_us":775.6,"max_us":4219.1,"errors":0}
+proxy w=1	{"mode":"rr","connections":256,"size":64,"seconds":5.0,"requests":1162994,"rps":232599,"mb_per_s":14.89,"gbit_per_s":0.119,"p50_us":1013.5,"p90_us":1552.4,"p99_us":1836.0,"p999_us":3322.0,"max_us":4434.4,"errors":0}
+cpu w=1	{"rps":260478,"user_us":0.40,"sys_us":3.47}
+proxy w=2	{"mode":"rr","connections":256,"size":64,"seconds":5.0,"requests":1338239,"rps":267648,"mb_per_s":17.13,"gbit_per_s":0.137,"p50_us":948.4,"p90_us":1133.1,"p99_us":1262.3,"p999_us":1404.8,"max_us":3187.5,"errors":0}
+cpu w=2	{"rps":269342,"user_us":0.67,"sys_us":6.77}
+proxy w=3	{"mode":"rr","connections":256,"size":64,"seconds":5.0,"requests":2183046,"rps":436609,"mb_per_s":27.94,"gbit_per_s":0.224,"p50_us":584.8,"p90_us":676.7,"p99_us":768.8,"p999_us":1415.4,"max_us":4634.4,"errors":0}
+cpu w=3	{"rps":434355,"user_us":0.58,"sys_us":6.30}
+# 3. Bulk throughput against buffer size: 8 streams of 64 KiB writes
+buffer 4KiB	{"mode":"stream","connections":8,"size":65536,"seconds":5.0,"requests":0,"rps":0,"mb_per_s":564.03,"gbit_per_s":4.512,"p50_us":0.0,"p90_us":0.0,"p99_us":0.0,"p999_us":0.0,"max_us":0.0,"errors":0}
+syscalls 4KiB	{"reads_per_mb":250.3,"writes_per_mb":250.3}
+buffer 16KiB	{"mode":"stream","connections":8,"size":65536,"seconds":5.0,"requests":0,"rps":0,"mb_per_s":2994.40,"gbit_per_s":23.955,"p50_us":0.0,"p90_us":0.0,"p99_us":0.0,"p999_us":0.0,"max_us":0.0,"errors":0}
+syscalls 16KiB	{"reads_per_mb":62.6,"writes_per_mb":62.6}
+buffer 64KiB	{"mode":"stream","connections":8,"size":65536,"seconds":5.0,"requests":0,"rps":0,"mb_per_s":3113.65,"gbit_per_s":24.909,"p50_us":0.0,"p90_us":0.0,"p99_us":0.0,"p999_us":0.0,"max_us":0.0,"errors":0}
+syscalls 64KiB	{"reads_per_mb":15.3,"writes_per_mb":15.3}
+buffer 256KiB	{"mode":"stream","connections":8,"size":65536,"seconds":5.0,"requests":0,"rps":0,"mb_per_s":4089.11,"gbit_per_s":32.713,"p50_us":0.0,"p90_us":0.0,"p99_us":0.0,"p999_us":0.0,"max_us":0.0,"errors":0}
+syscalls 256KiB	{"reads_per_mb":4.1,"writes_per_mb":4.1}
+# 4. Connection churn: a new connection for every 64-byte request, 64 at a time
+direct	{"mode":"connect","connections":64,"size":64,"seconds":5.0,"requests":101586,"rps":20317,"mb_per_s":1.30,"gbit_per_s":0.010,"p50_us":319.1,"p90_us":9670.8,"p99_us":15552.8,"p999_us":20697.2,"max_us":25713.9,"errors":0}
+proxy w=3	{"mode":"connect","connections":64,"size":64,"seconds":5.0,"requests":517471,"rps":103494,"mb_per_s":6.62,"gbit_per_s":0.053,"p50_us":612.0,"p90_us":756.0,"p99_us":919.6,"p999_us":1121.9,"max_us":3511.2,"errors":0}
+# 5. One slow backend (+20 ms) among three, a new connection per request
+round-robin	{"mode":"connect","connections":48,"size":64,"seconds":5.0,"requests":31880,"rps":6376,"mb_per_s":0.41,"gbit_per_s":0.003,"p50_us":758.6,"p90_us":21712.4,"p99_us":24475.9,"p999_us":26746.1,"max_us":29974.4,"errors":0}
+least-connections	{"mode":"connect","connections":48,"size":64,"seconds":5.0,"requests":470197,"rps":94039,"mb_per_s":6.02,"gbit_per_s":0.048,"p50_us":208.7,"p90_us":316.7,"p99_us":20553.8,"p999_us":20952.2,"max_us":22856.1,"errors":0}
+# 6. A backend is killed 3 s into a 10 s run, a new connection per request
+retries=0 eject_for_s=0	{"mode":"connect","connections":48,"size":64,"seconds":10.0,"requests":848219,"rps":84822,"mb_per_s":5.43,"gbit_per_s":0.043,"p50_us":446.8,"p90_us":590.0,"p99_us":745.3,"p999_us":1130.5,"max_us":12300.1,"errors":273434}
+proxy	"tcp-proxy: stopped. 1221234 connections, 273434 failed connects (0 retried), 273434 clients never reached a backend, 75870976 bytes up, 60657856 bytes down"
+retries=2 eject_for_s=0	{"mode":"connect","connections":48,"size":64,"seconds":10.0,"requests":976088,"rps":97609,"mb_per_s":6.25,"gbit_per_s":0.050,"p50_us":462.5,"p90_us":677.9,"p99_us":861.1,"p999_us":1056.9,"max_us":4220.3,"errors":6}
+proxy	"tcp-proxy: stopped. 1077872 connections, 221436 failed connects (221436 retried), 0 clients never reached a backend, 68983232 bytes up, 68982848 bytes down"
+retries=2 eject_for_s=5	{"mode":"connect","connections":48,"size":64,"seconds":10.0,"requests":1022936,"rps":102294,"mb_per_s":6.55,"gbit_per_s":0.052,"p50_us":454.8,"p90_us":610.9,"p99_us":764.5,"p999_us":993.2,"max_us":20464.0,"errors":10}
+proxy	"tcp-proxy: stopped. 1123382 connections, 11 failed connects (11 retried), 0 clients never reached a backend, 71896064 bytes up, 71895424 bytes down"

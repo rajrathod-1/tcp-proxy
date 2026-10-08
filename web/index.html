@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TCP Proxy · Raj Rathod</title>
+  <meta name="description" content="A multithreaded Layer 4 TCP proxy for Linux in C++20: epoll workers, round-robin, least-connections and source-hash balancing, passive health checks, per-connection telemetry, and load-test results." />
+  <meta property="og:title" content="A TCP proxy that routes around slow and dead backends" />
+  <meta property="og:description" content="The proxy's balancer, compiled to WebAssembly, steering simulated traffic. Kill a backend or slow one down and watch it react, then see the proxy's load-test results on Linux." />
+  <meta name="theme-color" content="#0b0b0c" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230b0b0c'/%3E%3Cpath d='M2 8h5M7 8l6-4M7 8h6M7 8l6 4' stroke='%23ebe7df' stroke-width='1.3' fill='none'/%3E%3Ccircle cx='7' cy='8' r='1.6' fill='%23ff4b1f'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400&family=Martian+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #0b0b0c;
+      --paper: #ebe7df;
+      --signal: #ff4b1f;
+      --ok: #8fc9a3;
+      --warn: #e9b44c;
+      --dim: color-mix(in srgb, var(--paper) 62%, transparent);
+      --line: color-mix(in srgb, var(--paper) 14%, transparent);
+      --panel: color-mix(in srgb, var(--paper) 4%, transparent);
+      --serif: "Instrument Serif", Georgia, serif;
+      --sans: "Instrument Sans", system-ui, sans-serif;
+      --mono: "Martian Mono", ui-monospace, monospace;
+      --code: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      --gutter: clamp(16px, 4vw, 56px);
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--ink);
+      color: var(--paper);
+      font: 400 1rem/1.6 var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; }
+    :focus-visible { outline: 1px solid var(--signal); outline-offset: 3px; }
+    .mono { font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; }
+    .dim { color: var(--dim); }
+    .wrap { max-width: 1240px; margin: 0 auto; padding: 0 var(--gutter); }
+    code { font-family: var(--code); font-size: 0.9em; font-variant-ligatures: none; }
+
+    header.top { display: flex; justify-content: space-between; gap: 16px; padding: 22px 0; }
+    header.top nav { display: flex; gap: 24px; }
+    header.top a { text-decoration: none; }
+    header.top a:hover { color: var(--signal); }
+
+    .intro { padding: 5vh 0 4vh; max-width: 56rem; }
+    h1 {
+      font: 400 clamp(2.75rem, 7vw, 6rem) / 0.95 var(--serif);
+      letter-spacing: -0.02em;
+      margin: 0.4em 0 0.35em;
+    }
+    h1 em, h2 em { color: var(--signal); }
+    .lede { font-size: clamp(1.05rem, 1.4vw, 1.25rem); max-width: 44rem; margin: 0; }
+
+    button {
+      font: inherit; color: inherit; cursor: pointer;
+      background: none;
+      border: 1px solid var(--line);
+      padding: 8px 12px;
+      transition: border-color 0.2s, color 0.2s, background-color 0.2s;
+    }
+    button:hover { border-color: var(--paper); }
+    button[aria-pressed="true"] { border-color: var(--signal); color: var(--signal); }
+    button:disabled { opacity: 0.5; cursor: progress; }
+
+    /* ── Live ───────────────────────────────────── */
+    .live { border-top: 1px solid var(--line); padding: 28px 0 56px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px 24px; align-items: center; margin-bottom: 22px; }
+    .segmented { display: flex; flex-wrap: wrap; gap: 6px; }
+    label.rate { display: flex; align-items: center; gap: 10px; }
+    input[type=range] { accent-color: var(--signal); width: 160px; }
+
+    .side { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 32px; margin-top: 28px; }
+    @media (max-width: 960px) { .side { grid-template-columns: 1fr; } }
+
+    table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+    th, td { text-align: left; padding: 9px 8px; border-top: 1px solid var(--line); vertical-align: middle; }
+    th { color: var(--dim); font-weight: 400; font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase; }
+    td.num, th.num { text-align: right; }
+    .scroll { overflow-x: auto; }
+
+    #backends .name { white-space: nowrap; }
+    #backends .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); margin-right: 8px; }
+    #backends tr.slow .dot { background: var(--warn); }
+    #backends tr.down .dot { background: var(--signal); }
+    #backends .state { color: var(--dim); white-space: nowrap; }
+    #backends tr.down .state { color: var(--signal); }
+    #backends tr.slow .state { color: var(--warn); }
+    #backends .load { width: 30%; min-width: 120px; }
+    .bar { display: inline-flex; width: calc(100% - 5ch); height: 8px; background: var(--panel); vertical-align: middle; }
+    .bar .busy { background: var(--ok); transition: width 0.15s linear; }
+    .bar .queued { background: var(--warn); transition: width 0.15s linear; }
+    #backends tr.down .bar .busy { background: var(--signal); }
+    #backends .n { display: inline-block; width: 5ch; text-align: right; }
+    #backends .acts { white-space: nowrap; text-align: right; }
+    #backends .acts button { padding: 5px 9px; font-size: 0.625rem; }
+    #backends button.kill[aria-pressed="true"] { color: var(--signal); border-color: var(--signal); }
+    #backends button.slow[aria-pressed="true"] { color: var(--warn); border-color: var(--warn); }
+
+    .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px 16px; margin: 0; align-content: start; }
+    .stats dt { color: var(--dim); }
+    .stats dd { margin: 4px 0 0; font: 400 clamp(1.5rem, 2.4vw, 2rem) / 1 var(--serif); font-variant-numeric: tabular-nums; }
+    .stats dd small { font: 400 0.6875rem var(--mono); color: var(--dim); margin-left: 4px; }
+    .tape { list-style: none; margin: 0; padding: 0; font: 400 0.6875rem/1.5 var(--code); font-variant-ligatures: none; color: var(--dim); }
+    .tape li { padding: 5px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+    .tape li.retry { color: var(--warn); }
+    .tape li.bad { color: var(--signal); }
+    .legend { margin-top: 14px; }
+    .legend span::before { content: ""; display: inline-block; width: 10px; height: 8px; margin: 0 6px 0 14px; vertical-align: middle; }
+    .legend .l-busy::before { background: var(--ok); margin-left: 0; }
+    .legend .l-queued::before { background: var(--warn); }
+
+    /* ── Sections ───────────────────────────────── */
+    section.block { border-top: 1px solid var(--line); padding: 48px 0 56px; }
+    h2 { font: 400 clamp(2rem, 4.5vw, 3.5rem) / 1 var(--serif); letter-spacing: -0.015em; margin: 0.35em 0 0.4em; }
+    h3 { font: 400 1.6rem/1.1 var(--serif); margin: 40px 0 6px; }
+    section.block p { max-width: 46rem; }
+    .results td, .results th { text-align: right; }
+    .results td:first-child, .results th:first-child { text-align: left; }
+    #compare-table td:nth-child(2), #compare-table th:nth-child(2) { text-align: left; }
+    td strong { color: var(--signal); font-weight: 500; }
+    #compare-status { min-height: 1.6em; margin-top: 14px; }
+
+    footer { border-top: 1px solid var(--line); padding: 28px 0 40px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
+    .error { color: var(--signal); }
+
+    @media (prefers-reduced-motion: reduce) {
+      .bar .busy, .bar .queued, button { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top mono">
+      <a href="https://raj-rathod-portfolio.vercel.app">Raj Rathod</a>
+      <nav>
+        <a href="#results">Results</a>
+        <a href="https://github.com/rajrathod-1/tcp-proxy">GitHub ↗</a>
+      </nav>
+    </header>
+
+    <section class="intro">
+      <p class="mono" style="color: var(--signal)">C++20 · epoll · Linux</p>
+      <h1>A TCP proxy, <em>routing around trouble.</em></h1>
+      <p class="lede dim">
+        A multithreaded Layer 4 proxy with an epoll event loop per worker, three balancing
+        strategies, passive health checks that retry a refused connect on another backend, and a
+        line of JSON telemetry for every connection. A browser has no sockets, so the proxy's
+        balancer is compiled to WebAssembly below and given simulated backends to route to. The
+        results further down are the real proxy under load on Linux.
+      </p>
+    </section>
+
+    <section class="live" aria-label="Live balancer">
+      <div class="controls mono">
+        <div class="segmented" role="group" aria-label="Strategy">
+          <button type="button" data-strategy="0" aria-pressed="false">Round robin</button>
+          <button type="button" data-strategy="1" aria-pressed="true">Least connections</button>
+          <button type="button" data-strategy="2" aria-pressed="false">Source hash</button>
+        </div>
+        <label class="rate">New connections <input id="rate" type="range" min="100" max="3000" step="100" value="1200" /> <span id="rate-out">1,200</span>/s</label>
+      </div>
+      <p id="load-error" class="error mono" hidden>WebAssembly failed to load in this browser.</p>
+
+      <div>
+        <div>
+          <div class="scroll">
+            <table aria-label="Backends">
+              <thead><tr><th>Backend</th><th>State</th><th>Open connections</th><th class="num">Share</th><th class="num">p50 ms</th><th class="num">p99 ms</th><th></th></tr></thead>
+              <tbody id="backends"></tbody>
+            </table>
+          </div>
+          <p class="legend mono dim"><span class="l-busy">Being served</span><span class="l-queued">Queued at the backend</span></p>
+          <p class="dim">
+            Each backend serves 16 connections at once in about 10 ms each and queues the rest.
+            Slow one down and round robin keeps feeding it its quarter until its queue overflows;
+            least connections sees the open connections pile up and sends new ones elsewhere.
+            Kill one and the first refused connect ejects it for five seconds, while that client
+            is retried on another backend.
+          </p>
+        </div>
+        <div class="side">
+          <dl class="stats">
+            <div><dt class="mono">Completed / s</dt><dd id="t-rate">0</dd></div>
+            <div><dt class="mono">p50</dt><dd><span id="t-p50">—</span><small>ms</small></dd></div>
+            <div><dt class="mono">p99</dt><dd><span id="t-p99">—</span><small>ms</small></dd></div>
+            <div><dt class="mono">Retried connects</dt><dd id="t-retries">0</dd></div>
+            <div><dt class="mono">Failed clients</dt><dd id="t-errors">0</dd></div>
+          </dl>
+          <div>
+            <p class="mono dim" style="margin-top: 0">Telemetry · the fields the proxy logs, sampled</p>
+            <ol class="tape" id="tape" aria-live="off"></ol>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="block" id="compare">
+      <p class="mono" style="color: var(--signal)">Measure it yourself</p>
+      <h2>Compare the strategies</h2>
+      <p class="dim">
+        The same balancer and the same simulated backends, run in simulated time so each row
+        takes a moment rather than half a minute: 40,000 connections at 1,200 a second, once
+        with backend 4 eight times slower than the rest, and once with backend 4 dying a quarter
+        of the way through.
+      </p>
+      <button type="button" id="run-compare" class="mono">Run the comparison</button>
+      <p id="compare-status" class="mono dim" role="status"></p>
+      <div class="scroll">
+        <table id="compare-table" class="results" hidden>
+          <thead><tr><th>Scenario</th><th>Strategy</th><th>p50</th><th>p99</th><th>Sent to backend 4</th><th>Retried</th><th>Failed</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="block" id="results">
+      <p class="mono" style="color: var(--signal)">The real proxy, on Linux</p>
+      <h2>Under load</h2>
+      <p class="dim">
+        Measured with the repository's own load generator and echo backend, all on loopback in a
+        Linux 6.12 VM on an Apple M4 Pro, with backends, proxy and load generator pinned to
+        separate CPUs. Each number is the median of three five-second runs;
+        <code>scripts/bench.sh</code> reproduces all of them.
+      </p>
+
+      <h3>Where the time goes</h3>
+      <p class="dim">
+        One worker relays about 250,000 small requests a second and spends 3.9 µs of CPU on
+        each: 0.4 µs in the proxy's own code and 3.5 µs in the kernel. Every request costs
+        exactly four system calls, a read and a send in each direction, and each
+        <code>epoll_wait</code> returns about 255 ready sockets, so the event loop's own cost is
+        amortised away. What is left is the TCP stack, so the ways up are more cores, or fewer
+        system calls per byte.
+      </p>
+      <div class="scroll">
+        <table class="results">
+          <thead><tr><th>64-byte echo</th><th>Requests / s</th><th>p50</th><th>p90</th><th>p99</th></tr></thead>
+          <tbody>
+            <tr><td>1 connection, direct</td><td>35,989</td><td>26.6 µs</td><td>31.4 µs</td><td>43.9 µs</td></tr>
+            <tr><td>1 connection, through the proxy</td><td>17,577</td><td>54.1 µs</td><td>63.4 µs</td><td>95.1 µs</td></tr>
+            <tr><td>256 connections, direct</td><td>971,697</td><td>239 µs</td><td>383 µs</td><td>547 µs</td></tr>
+            <tr><td>256 connections, 1 worker</td><td>232,599</td><td>1,014 µs</td><td>1,552 µs</td><td>1,836 µs</td></tr>
+            <tr><td>256 connections, 2 workers</td><td>267,648</td><td>948 µs</td><td>1,133 µs</td><td>1,262 µs</td></tr>
+            <tr><td>256 connections, 3 workers</td><td>436,609</td><td>585 µs</td><td>677 µs</td><td>769 µs</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="dim">
+        The proxy adds about 28 µs to a round trip: two more hops through loopback. Scaling
+        across workers is uneven here, and this setup could not separate kernel contention
+        from the VM sharing eight performance cores between the load generator, the backends
+        and the proxy.
+      </p>
+
+      <h3>Bulk throughput is set by system calls per byte</h3>
+      <div class="scroll">
+        <table class="results">
+          <thead><tr><th>Buffer per direction</th><th>Throughput</th><th>System calls per MB</th></tr></thead>
+          <tbody>
+            <tr><td>4 KiB</td><td>4.5 Gbit/s</td><td>501</td></tr>
+            <tr><td>16 KiB (default)</td><td><strong>24.0 Gbit/s</strong></td><td>125</td></tr>
+            <tr><td>64 KiB</td><td>24.9 Gbit/s</td><td>31</td></tr>
+            <tr><td>256 KiB</td><td>32.7 Gbit/s</td><td>8</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="dim">
+        Eight connections streaming 64 KiB writes through three workers, with system calls
+        counted from the proxy's own telemetry. Quadrupling the buffer from 4 to 16 KiB cuts
+        the calls by four and multiplies throughput by five; past that, copying dominates and
+        each step buys less. 16 KiB is the default because the buffer is paid for twice on
+        every open connection.
+      </p>
+
+      <h3>One slow backend</h3>
+      <div class="scroll">
+        <table class="results">
+          <thead><tr><th>Strategy</th><th>Requests / s</th><th>p50</th><th>p90</th><th>p99</th></tr></thead>
+          <tbody>
+            <tr><td>Round robin</td><td>6,376</td><td>0.76 ms</td><td>21.7 ms</td><td>24.5 ms</td></tr>
+            <tr><td>Least connections</td><td><strong>94,039</strong></td><td>0.21 ms</td><td>0.32 ms</td><td>20.6 ms</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="dim">
+        Three backends, one answering 20 ms late, and a new connection for every request, 48 at
+        a time. Round robin hands the slow backend a third of the requests, so every client
+        spends most of its time waiting on it. Least connections sees its open connections pile
+        up and sends almost everything elsewhere: 15 times the throughput.
+      </p>
+
+      <h3>A backend dies</h3>
+      <div class="scroll">
+        <table class="results">
+          <thead><tr><th>Retries</th><th>Ejection</th><th>Failed requests</th><th>Failed connects</th><th>Requests / s</th></tr></thead>
+          <tbody>
+            <tr><td>none</td><td>off</td><td>273,434</td><td>273,434</td><td>84,822</td></tr>
+            <tr><td>2</td><td>off</td><td>6</td><td>221,436</td><td>97,609</td></tr>
+            <tr><td>2</td><td>5 s</td><td><strong>10</strong></td><td><strong>11</strong></td><td>102,294</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="dim">
+        One of three backends is killed 3 s into a 10 s run. Without retries, every connection
+        sent to it fails. With retries, a refused connect is tried on another backend before
+        the client has lost anything, but the dead one is still tried first a third of the
+        time. Ejection takes it out after its first failure and lets one connect probe it every
+        five seconds. The failures left are the requests that were mid-flight on the backend
+        when it died: their bytes were already sent, so a Layer 4 proxy cannot replay them.
+        Opening a fresh connection for every request, the proxy sustained 103,494 a second with
+        a p99 of 0.92 ms.
+      </p>
+    </section>
+
+    <footer class="mono dim">
+      <span>Raj Rathod · MIT licensed</span>
+      <span>
+        <a href="https://github.com/rajrathod-1/tcp-proxy">Source and full results ↗</a>
+        &nbsp;·&nbsp;
+        <a href="https://raj-rathod-portfolio.vercel.app">Portfolio ↗</a>
+      </span>
+    </footer>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
